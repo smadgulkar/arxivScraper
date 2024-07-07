@@ -1,9 +1,9 @@
 import scrapy
 import re
-import anthropic
 from scrapy.crawler import CrawlerProcess
 from dotenv import load_dotenv
 import os
+import anthropic
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,7 +24,6 @@ class ArxivSpider(scrapy.Spider):
                 paper_url = f"https://arxiv.org{paper_id}"
                 yield scrapy.Request(paper_url, callback=self.parse_paper)
 
-        # Find the "next page" link and follow it
         next_page_links = response.css('ul.pagination a::attr(href)').getall()
         if next_page_links:
             next_page = next_page_links[-1]
@@ -73,15 +72,29 @@ class ArxivSpider(scrapy.Spider):
                   f"concepts or methods that could potentially be used to generate alpha or new trading ideas? "
                   f"If so, provide a brief explanation.")
 
-        response = c.completion(
+        response = c.completions.create(
             prompt=f"\n\nHuman: {prompt}\n\nAssistant:",
             stop_sequences=["\n\nHuman:"],
-            model="claude-v1.3",
+            model="claude-3-sonnet-20240229",
             max_tokens_to_sample=200,
         )
         reason = response.completion
         relevance_for_trading = "yes" in reason.lower()
         return {"relevance_for_trading": relevance_for_trading, "reason": reason}
+
+    def is_relevant(self, title, abstract):
+        keywords_pattern = re.compile(
+            r"statistical\s+methods|trading|investing|factor\s+models|low\s+volatility|alpha\s+generation|"
+            r"time\s+series|stochastic\s+processes|econometrics|technical\s+analysis|portfolio\s+optimization|"
+            r"option\s+pricing|machine\s+learning|high-frequency\s+trading|HFT|mean\s+reversion|momentum|"
+            r"pairs\s+trading|statistical\s+arbitrage|volatility\s+trading|asset\s+pricing|market\s+efficiency|"
+            r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s+forecasting|"
+            r"predictive\s+modeling|pattern\s+recognition|data\s+mining|"
+            r"probabilistic|probability|likelihood|uncertainty|random|distribution|Bayesian|Monte Carlo|Markov chain|stochastic volatility",
+            re.IGNORECASE  # Case-insensitive matching
+        )
+        text = (title + ' ' + (abstract or ''))
+        return keywords_pattern.search(text) is not None
 
 
 def display_captured_papers(papers):
@@ -90,7 +103,7 @@ def display_captured_papers(papers):
         print(f"\n--- Paper {i} ---")
         print(f"Title: {paper['title']}")
         print(f"Authors: {', '.join(paper['authors'])}")
-        print(f"Abstract: {paper['abstract'][:200]}...")  # Display first 200 characters of abstract
+        print(f"Abstract: {paper['abstract'][:200]}...")
         print(f"PDF Link: {paper['pdf_link']}")
         print(f"Evaluation: {paper['evaluation']}")
 
