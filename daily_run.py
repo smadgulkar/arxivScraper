@@ -8,7 +8,7 @@ os.environ['SCRAPY_SETTINGS_MODULE'] = 'your_project_name.settings'
 
 class ArxivSpider(scrapy.Spider):
     name = 'arxiv_spider'
-    start_urls = ['https://arxiv.org/list/q-fin/recent']
+    start_urls = ['https://arxiv.org/list/q-fin/recent', 'https://arxiv.org/list/econ.EM/recent', 'https://arxiv.org/list/stat/recent']
     captured_papers = []
 
     def parse(self, response):
@@ -27,9 +27,11 @@ class ArxivSpider(scrapy.Spider):
 
     def parse_paper(self, response):
         try:
-            title = response.css('h1.title.mathjax ::text').get().strip()
-            if not title:
-                raise AttributeError("Title not found")
+            title_span = response.css('h1.title.mathjax span.descriptor::text').get()
+            if title_span == "Title:":
+                title = response.css('h1.title.mathjax ::text')[1].get().strip()  # Get the second text node
+            else:
+                raise AttributeError("Title not found or formatted unexpectedly")
 
             abstract_elem = response.css('blockquote.abstract.mathjax')
             abstract = "".join(abstract_elem.css('span::text, blockquote::text').getall())
