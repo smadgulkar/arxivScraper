@@ -1,14 +1,20 @@
 import scrapy
 import re
+import anthropic
 from scrapy.crawler import CrawlerProcess
+from dotenv import load_dotenv
 import os
 
-# Suppress the ScrapyDeprecationWarning (optional)
-os.environ['SCRAPY_SETTINGS_MODULE'] = 'your_project_name.settings'
+# Load environment variables from .env file
+load_dotenv()
+
+# Access the Anthropic API key from environment variables
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+
 
 class ArxivSpider(scrapy.Spider):
     name = 'arxiv_spider'
-    start_urls = ['https://arxiv.org/list/q-fin/recent', 'https://arxiv.org/list/econ.EM/recent', 'https://arxiv.org/list/stat/recent']
+    start_urls = ['https://arxiv.org/list/q-fin/recent', 'https://arxiv.org/list/econ.EM/recent']
     captured_papers = []
 
     def parse(self, response):
@@ -24,12 +30,11 @@ class ArxivSpider(scrapy.Spider):
             next_page = next_page_links[-1]
             yield response.follow(next_page, self.parse)
 
-
     def parse_paper(self, response):
         try:
             title_span = response.css('h1.title.mathjax span.descriptor::text').get()
             if title_span == "Title:":
-                title = response.css('h1.title.mathjax ::text')[1].get().strip()  # Get the second text node
+                title = response.css('h1.title.mathjax ::text')[1].get().strip()
             else:
                 raise AttributeError("Title not found or formatted unexpectedly")
 
@@ -44,33 +49,39 @@ class ArxivSpider(scrapy.Spider):
                 'div.extra-services div.full-text a::attr(href)').get())
 
             if self.is_relevant(title, abstract):
-                item = {
-                    'title': title,
-                    'authors': authors,
-                    'abstract': abstract,
-                    'pdf_link': pdf_link
-                }
-                yield item
-                self.captured_papers.append(item)
+                # Ask Claude to evaluate the abstract
+                evaluation = self.evaluate_abstract(abstract)
+                if evaluation["relevance_for_trading"]:
+                    item = {
+                        'title': title,
+                        'authors': authors,
+                        'abstract': abstract,
+                        'pdf_link': pdf_link,
+                        'evaluation': evaluation["reason"]
+                    }
+                    yield item
+                    self.captured_papers.append(item)
 
         except AttributeError as e:
             self.logger.warning(
                 f"Error extracting data for paper '{title or 'Unknown Title'}': {e}")
 
-    def is_relevant(self, title, abstract):
-        keywords_pattern = re.compile(
-            r"statistical\s+methods|trading|investing|factor\s+models|low\s+volatility|alpha\s+generation|"
-            r"time\s+series|stochastic\s+processes|econometrics|technical\s+analysis|portfolio\s+optimization|"
-            r"option\s+pricing|machine\s+learning|high-frequency\s+trading|HFT|mean\s+reversion|momentum|"
-            r"pairs\s+trading|statistical\s+arbitrage|volatility\s+trading|asset\s+pricing|market\s+efficiency|"
-            r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s+forecasting|"
-            r"predictive\s+modeling|pattern\s+recognition|data\s+mining|"  # Previous terms
-            r"probabilistic|probability|likelihood|uncertainty|random|distribution|Bayesian|Monte Carlo|Markov chain|stochastic volatility",
-            # New terms
-            re.IGNORECASE  # Case-insensitive matching
+    def evaluate_abstract(self, abstract):
+        c = anthropic.Client(api_key=anthropic_api_key)
+        prompt = (f"Please evaluate the following research paper abstract in the context of generating "
+                  f"trading ideas for US equity markets:\n\n{abstract}\n\nDoes the abstract discuss "
+                  f"concepts or methods that could potentially be used to generate alpha or new trading ideas? "
+                  f"If so, provide a brief explanation.")
+
+        response = c.completion(
+            prompt=f"\n\nHuman: {prompt}\n\nAssistant:",
+            stop_sequences=["\n\nHuman:"],
+            model="claude-v1.3",
+            max_tokens_to_sample=200,
         )
-        text = (title + ' ' + (abstract or ''))
-        return keywords_pattern.search(text) is not None
+        reason = response.completion
+        relevance_for_trading = "yes" in reason.lower()
+        return {"relevance_for_trading": relevance_for_trading, "reason": reason}
 
 
 def display_captured_papers(papers):
@@ -79,8 +90,9 @@ def display_captured_papers(papers):
         print(f"\n--- Paper {i} ---")
         print(f"Title: {paper['title']}")
         print(f"Authors: {', '.join(paper['authors'])}")
-        print(f"Abstract: {paper['abstract'][:200]}...")
+        print(f"Abstract: {paper['abstract'][:200]}...")  # Display first 200 characters of abstract
         print(f"PDF Link: {paper['pdf_link']}")
+        print(f"Evaluation: {paper['evaluation']}")
 
 
 if __name__ == "__main__":
