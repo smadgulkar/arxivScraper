@@ -60,9 +60,15 @@ class ArxivSpider(scrapy.Spider):
 
     def is_relevant(self, title, abstract):
         keywords_pattern = re.compile(
-            r"statistical methods|trading|investing|factor models|low volatility|alpha generation",
-            re.IGNORECASE
+            r"statistical\s+methods|trading|investing|factor\s+models|low\s+volatility|alpha\s+generation|"
+            r"time\s+series|stochastic\s+processes|econometrics|technical\s+analysis|portfolio\s+optimization|"
+            r"option\s+pricing|machine\s+learning|high-frequency\s+trading|HFT|mean\s+reversion|momentum|"
+            r"pairs\s+trading|statistical\s+arbitrage|volatility\s+trading|asset\s+pricing|market\s+efficiency|"
+            r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s+forecasting|"
+            r"predictive\s+modeling|pattern\s+recognition|data\s+mining",
+            re.IGNORECASE  # Case-insensitive matching
         )
+
         text = (title + ' ' + (abstract or ''))
         return keywords_pattern.search(text) is not None
 
