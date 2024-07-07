@@ -57,7 +57,6 @@ class ArxivSpider(scrapy.Spider):
             self.logger.warning(
                 f"Error extracting data for paper '{title or 'Unknown Title'}': {e}")
 
-
     def is_relevant(self, title, abstract):
         keywords_pattern = re.compile(
             r"statistical\s+methods|trading|investing|factor\s+models|low\s+volatility|alpha\s+generation|"
@@ -65,10 +64,11 @@ class ArxivSpider(scrapy.Spider):
             r"option\s+pricing|machine\s+learning|high-frequency\s+trading|HFT|mean\s+reversion|momentum|"
             r"pairs\s+trading|statistical\s+arbitrage|volatility\s+trading|asset\s+pricing|market\s+efficiency|"
             r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s+forecasting|"
-            r"predictive\s+modeling|pattern\s+recognition|data\s+mining",
+            r"predictive\s+modeling|pattern\s+recognition|data\s+mining|"  # Previous terms
+            r"probabilistic|probability|likelihood|uncertainty|random|distribution|Bayesian|Monte Carlo|Markov chain|stochastic volatility",
+            # New terms
             re.IGNORECASE  # Case-insensitive matching
         )
-
         text = (title + ' ' + (abstract or ''))
         return keywords_pattern.search(text) is not None
 
