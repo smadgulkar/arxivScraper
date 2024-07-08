@@ -4,12 +4,17 @@ from scrapy.crawler import CrawlerProcess
 from dotenv import load_dotenv
 import os
 import anthropic
+import json
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Access the Anthropic API key from environment variables
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+
+# Set logging level to WARNING or higher to suppress INFO and DEBUG messages
+logging.getLogger('scrapy').setLevel(logging.WARNING)
 
 
 class ArxivSpider(scrapy.Spider):
@@ -71,16 +76,18 @@ class ArxivSpider(scrapy.Spider):
                   f"trading ideas for US equity markets:\n\n{abstract}\n\nDoes the abstract discuss "
                   f"concepts or methods that could potentially be used to generate alpha or new trading ideas? "
                   f"If so, provide a brief explanation.")
-
-        response = c.completions.create(
-            prompt=f"\n\nHuman: {prompt}\n\nAssistant:",
-            stop_sequences=["\n\nHuman:"],
+        response = c.messages.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }],
             model="claude-3-sonnet-20240229",
-            max_tokens_to_sample=200,
+            max_tokens=1024,
         )
-        reason = response.completion
-        relevance_for_trading = "yes" in reason.lower()
-        return {"relevance_for_trading": relevance_for_trading, "reason": reason}
+        reason = response.content[0]
+        relevance_for_trading = "yes" in reason.text.lower()  # Correct the relevance check
+        return {"relevance_for_trading": relevance_for_trading, "reason": reason.text}
 
     def is_relevant(self, title, abstract):
         keywords_pattern = re.compile(
@@ -98,18 +105,25 @@ class ArxivSpider(scrapy.Spider):
 
 
 def display_captured_papers(papers):
-    print(f"Number of relevant papers captured: {len(papers)}")
-    for i, paper in enumerate(papers, 1):
-        print(f"\n--- Paper {i} ---")
-        print(f"Title: {paper['title']}")
-        print(f"Authors: {', '.join(paper['authors'])}")
-        print(f"Abstract: {paper['abstract'][:200]}...")
-        print(f"PDF Link: {paper['pdf_link']}")
-        print(f"Evaluation: {paper['evaluation']}")
+    with open("arxiv_paper_report.txt", "w",encoding="utf-8") as f:  # Save report to a file
+        f.write(f"Number of relevant papers captured: {len(papers)}\n\n")
+        for i, paper in enumerate(papers, 1):
+            f.write(f"\n--- Paper {i} ---\n")
+            f.write(f"Title: {paper['title']}\n")
+            f.write(f"Authors: {', '.join(paper['authors'])}\n")
+            f.write(f"Abstract: {paper['abstract']}\n")  # Show the full abstract
+            f.write(f"PDF Link: {paper['pdf_link']}\n")
+            f.write(f"Evaluation: {paper['evaluation']}\n")
+
+        # Save as JSON for further analysis
+        with open("arxiv_paper_data.json", "w") as json_file:
+            json.dump(papers, json_file, indent=4)
+
+    print("Report saved to arxiv_paper_report.txt and arxiv_paper_data.json")
 
 
 if __name__ == "__main__":
-    process = CrawlerProcess()
+    process = CrawlerProcess(settings={'LOG_ENABLED': True,'LOG_LEVEL': 'WARNING'})
     process.crawl(ArxivSpider)
     process.start()  # This will block until the crawl is finished
 
