@@ -6,12 +6,17 @@ import os
 import anthropic
 import json
 import logging
+import requests
+import json
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Access the Anthropic API key from environment variables
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+teams_webhook_url = os.getenv("TEAMS_WEBHOOK_URL")
+teams_post_url = os.getenv('TEAMS_POST_URL')
+
 
 # Set logging level to WARNING or higher to suppress INFO and DEBUG messages
 logging.getLogger('scrapy').setLevel(logging.WARNING)
@@ -19,7 +24,8 @@ logging.getLogger('scrapy').setLevel(logging.WARNING)
 
 class ArxivSpider(scrapy.Spider):
     name = 'arxiv_spider'
-    start_urls = ['https://arxiv.org/list/q-fin/recent', 'https://arxiv.org/list/econ.EM/recent']
+    start_urls = ['https://arxiv.org/list/q-fin/recent', 'https://arxiv.org/list/econ.EM/recent',
+                  'https://arxiv.org/list/stat/recent']
     captured_papers = []
 
     def parse(self, response):
@@ -70,7 +76,8 @@ class ArxivSpider(scrapy.Spider):
             self.logger.warning(
                 f"Error extracting data for paper '{title or 'Unknown Title'}': {e}")
 
-    def evaluate_abstract(self, abstract):
+    @staticmethod
+    def evaluate_abstract(abstract):
         c = anthropic.Client(api_key=anthropic_api_key)
         prompt = (f"Please evaluate the following research paper abstract in the context of generating "
                   f"trading ideas for US equity markets:\n\n{abstract}\n\nDoes the abstract discuss "
@@ -89,15 +96,18 @@ class ArxivSpider(scrapy.Spider):
         relevance_for_trading = "yes" in reason.text.lower()  # Correct the relevance check
         return {"relevance_for_trading": relevance_for_trading, "reason": reason.text}
 
-    def is_relevant(self, title, abstract):
+    @staticmethod
+    def is_relevant(title, abstract):
         keywords_pattern = re.compile(
             r"statistical\s+methods|trading|investing|factor\s+models|low\s+volatility|alpha\s+generation|"
             r"time\s+series|stochastic\s+processes|econometrics|technical\s+analysis|portfolio\s+optimization|"
             r"option\s+pricing|machine\s+learning|high-frequency\s+trading|HFT|mean\s+reversion|momentum|"
             r"pairs\s+trading|statistical\s+arbitrage|volatility\s+trading|asset\s+pricing|market\s+efficiency|"
-            r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s+forecasting|"
+            r"risk\s+management|behavioral\s+finance|algorithmic\s+trading|quantitative\s+investment|financial\s"
+            r"+forecasting|"
             r"predictive\s+modeling|pattern\s+recognition|data\s+mining|"
-            r"probabilistic|probability|likelihood|uncertainty|random|distribution|Bayesian|Monte Carlo|Markov chain|stochastic volatility",
+            r"probabilistic|probability|likelihood|uncertainty|random|distribution|Bayesian"
+            r"|Monte Carlo|Markov chain|stochastic volatility",
             re.IGNORECASE  # Case-insensitive matching
         )
         text = (title + ' ' + (abstract or ''))
@@ -105,7 +115,7 @@ class ArxivSpider(scrapy.Spider):
 
 
 def display_captured_papers(papers):
-    with open("arxiv_paper_report.txt", "w",encoding="utf-8") as f:  # Save report to a file
+    with open("arxiv_paper_report.txt", "w", encoding="utf-8") as f:  # Save report to a file
         f.write(f"Number of relevant papers captured: {len(papers)}\n\n")
         for i, paper in enumerate(papers, 1):
             f.write(f"\n--- Paper {i} ---\n")
@@ -122,9 +132,55 @@ def display_captured_papers(papers):
     print("Report saved to arxiv_paper_report.txt and arxiv_paper_data.json")
 
 
+def send_teams_message(papers):
+    webhook_url = teams_webhook_url
+    message_card = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "themeColor": "0076D7",
+        "summary": "ArXiv Papers Report",
+        "sections": []
+    }
+
+    for i, paper in enumerate(papers, 1):
+        section = {
+            "activityTitle": f"Paper {i}: {paper['title']}",
+            "facts": [
+                {"name": "Authors", "value": ', '.join(paper['authors'])},
+                {"name": "Abstract", "value": paper['abstract'][:500] + "..." if len(paper['abstract']) > 500 else paper['abstract']},
+                {"name": "Evaluation", "value": paper['evaluation'][:500] + "..." if len(paper['evaluation']) > 500 else paper['evaluation']}
+            ],
+            "potentialAction": [
+                {
+                    "@type": "OpenUri",
+                    "name": "View PDF",
+                    "targets": [{"os": "default", "uri": paper['pdf_link']}]
+                }
+            ]
+        }
+        message_card["sections"].append(section)
+
+    try:
+        response = requests.post(
+            webhook_url,
+            json=message_card,
+            headers={'Content-Type': 'application/json'}
+        )
+        response.raise_for_status()
+        print("Message sent to Microsoft Teams successfully")
+        print(f"Response: {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending message to Microsoft Teams: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response content: {e.response.text}")
+
+    return message_card  # Return the message card for debugging purposes
+
 if __name__ == "__main__":
-    process = CrawlerProcess(settings={'LOG_ENABLED': True,'LOG_LEVEL': 'WARNING'})
+    process = CrawlerProcess(settings={'LOG_ENABLED': True, 'LOG_LEVEL': 'WARNING'})
     process.crawl(ArxivSpider)
     process.start()  # This will block until the crawl is finished
 
     display_captured_papers(ArxivSpider.captured_papers)
+    send_teams_message(ArxivSpider.captured_papers)
+
